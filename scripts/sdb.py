@@ -1,7 +1,7 @@
+import argparse, os
 import asyncio
+from pyexpat import model
 from random import randint
-#import nest_asyncio
-import os
 import uuid
 import time
 import math
@@ -11,7 +11,8 @@ from functools import partial
 from multiprocessing import Process, Value, Queue
 from threading import Thread
 
-from sync_utils import SyncDiffusionWorker
+from modules.sdb_shared import opt, processes
+from modules.sdb_utils import SyncDiffusionWorker
 
 import discord
 from discord.ext import commands, tasks
@@ -19,11 +20,11 @@ from discord.ext import commands, tasks
 from dotenv import load_dotenv
 load_dotenv()
 
+import questionary
 
-#nest_asyncio.apply()
 
-TOKEN = os.getenv('DISCORD_TOKEN')
-OUT_DIR = 'outputs\sync-diffusion'
+
+
 
 def get_resolution(ar, basesize):
     aspect = ar.split(':')
@@ -58,9 +59,25 @@ class ResultButtons(discord.ui.View):
             await discord.interaction.response.send_message(content=str(e))
             raise
 
+class InfoButtons(discord.ui.View):
+    def __init__(self, instance, timeout=180):
+        super().__init__(timeout=timeout)
+        self.instance = instance
+
+    @discord.ui.button(label="Cancel", style=discord.ButtonStyle.gray)
+    async def cancel_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        try:
+            button.style = discord.ButtonStyle.green
+            while not self.instance.dream_queue.empty():
+                self.instance.dream_queue.get()
+            await interaction.response.send_message(content=f"Send Cancel Dreaming!")
+        except Exception as e:
+            await discord.interaction.response.send_message(content=str(e))
+            raise
+
 
 class SyncDiffusionJob():
-    def __init__(self, id, interaction, payload, seed, total_itr, current_itr, dream_queue, awaken_queue, message_queue):
+    def __init__(self, id, interaction, payload, seed, total_itr, current_itr, dream_queue, awaken_queue, message_queue, out_dir):
         self.id = id
         self.interaction = interaction
         self.status = 'queued'
@@ -71,6 +88,7 @@ class SyncDiffusionJob():
         self.dream_queue = dream_queue
         self.awaken_queue = awaken_queue
         self.message_queue = message_queue
+        self.out_dir = out_dir
 
     async def dreaming(self):
         try:
@@ -87,9 +105,9 @@ class SyncDiffusionJob():
             await asyncio.sleep(randint(0, 2))
             print(f'bot: SyncDiffusionJob(): terminate(): await asyncio.sleep')
             print(awaken)
-            response_message = f'seed:  {self.seed}\nitr: {self.current_itr} / {self.total_itr}\nfilename: {awaken[2]}\nuser: {self.interaction.user.name} ({self.interaction.user.id}){awaken[3]}'
+            response_message = f'```seed:  {self.seed}\nitr: {self.current_itr} / {self.total_itr}\nfilename: {awaken[2]}\nuser: {self.interaction.user.name} ({self.interaction.user.id}){awaken[3]}```'
             print(f'bot: SyncDiffusionJob(): terminate(): response_message: {response_message}')
-            fp = f'{OUT_DIR}\{awaken[2]}'
+            fp = f'{self.out_dir}\{awaken[2]}'
             print(f'bot: SyncDiffusionJob(): terminate(): fp: {fp}')
             original_message = await self.interaction.original_response()
             print(f'bot: SyncDiffusionJob(): terminate(): original_message: {original_message}')
@@ -116,7 +134,7 @@ class SyncDiffusionBot(commands.Bot):
         print('Synced!')
 
 class SyncDiffusionCog(commands.Cog):
-    def __init__(self, bot: commands.Bot, dream_queue, awaken_queue, message_queue) -> None:
+    def __init__(self, bot: commands.Bot, dream_queue, awaken_queue, message_queue, out_dir) -> None:
         self.loop = asyncio.get_event_loop()
         self.bot = bot
         self.dream_queue = dream_queue
@@ -124,6 +142,7 @@ class SyncDiffusionCog(commands.Cog):
         self.message_queue = message_queue
         self.index = 0
         self.jobs = dict()
+        self.out_dir = out_dir
 
     async def setup_hook(self) -> None:
         print(f'bot: setup_hook(self)')
@@ -134,14 +153,12 @@ class SyncDiffusionCog(commands.Cog):
         print(f'bot: on_ready')
         await self.bot_loop.start()
 
-
-    @discord.app_commands.command(name="cancel")
-    async def cancel_dream(self, interaction: discord.Interaction):
+    @discord.app_commands.command(name="info")
+    async def show_info(self, interaction: discord.Interaction):
         try:
-            print(f'bot: cancel_dream')
-            while not self.dream_queue.empty():
-                self.dream_queue.get()
-            await interaction.response.send_message(content=f"Cancel Dreaming!")
+            print(f'bot: show_info')
+            worker_number = len(processes)
+            await interaction.response.send_message(content=f"```job_queue_number: {self.dream_queue.qsize()}\nworker_number: {worker_number}```", view=InfoButtons(self))
         except Exception as e:
             await discord.interaction.response.send_message(content=str(e))
             raise
@@ -186,11 +203,9 @@ class SyncDiffusionCog(commands.Cog):
                 random_seed = False
                 seed_message = f'seed: {seed} '
 
-
-
             fp = None
     
-            message = f'{prompt} \n\nitr:{itr} ar:{ar} basesize:{basesize} \nddim_steps:{ddim_steps} cfg_scale:{cfg_scale} sampler_name:{sampler_name} \nmatrix:{matrix} normalize:{normalize} gfpgan:{gfpgan} realesrgan:{realesrgan} realesrgan_anime:{realesrgan_anime}\n\nuser: {username} ({userid})'
+            message = f'{prompt}\n```itr:{itr} ar:{ar} basesize:{basesize} \nddim_steps:{ddim_steps} cfg_scale:{cfg_scale} sampler_name:{sampler_name} \nmatrix:{matrix} normalize:{normalize} gfpgan:{gfpgan} realesrgan:{realesrgan} realesrgan_anime:{realesrgan_anime}\nuser: {username} ({userid})```'
             await interaction.response.send_message(content=message)
             print(itr)
 
@@ -202,7 +217,7 @@ class SyncDiffusionCog(commands.Cog):
                 if random_seed:
                     seed = randint(0, 9999999999)
                 payload = [prompt, ddim_steps, sampler_name, toggles, realesrgan_model_name, ddim_eta, n_iter, batch_size, cfg_scale, seed, height, width, fp]
-                job = SyncDiffusionJob(id, interaction, payload, seed, total_itr, current_itr, self.dream_queue, self.awaken_queue, self.message_queue)
+                job = SyncDiffusionJob(id, interaction, payload, seed, total_itr, current_itr, self.dream_queue, self.awaken_queue, self.message_queue, self.out_dir)
                 self.jobs[id] = job
                 await job.dreaming()
 
@@ -235,7 +250,7 @@ class SyncDiffusionCog(commands.Cog):
             raise
 
 
-def bot_launch(dream_queue, awaken_queue, message_queue):
+def bot_launch(dream_queue, awaken_queue, message_queue, out_dir):
     retry_count = 0
     while True:
         try:
@@ -244,7 +259,7 @@ def bot_launch(dream_queue, awaken_queue, message_queue):
             print('start bot')
             bot = SyncDiffusionBot(dream_queue, awaken_queue, message_queue)
             
-            loop.run_until_complete(bot.add_cog(SyncDiffusionCog(bot, dream_queue, awaken_queue, message_queue)))
+            loop.run_until_complete(bot.add_cog(SyncDiffusionCog(bot, dream_queue, awaken_queue, message_queue, out_dir)))
             asyncio.run(bot.start(token=TOKEN))
         except Exception as e:
             retry_count += 1
@@ -256,13 +271,13 @@ def bot_launch(dream_queue, awaken_queue, message_queue):
                 break
             time.sleep(retry_count * 2 ** 3)
 
-async def save_file(response):
+async def save_file(response, out_dir):
     try:
         print(f'response: {str(response)}')
         now = int(time.time())
 
-        if not os.path.exists(OUT_DIR):
-            os.makedirs(OUT_DIR)
+        if not os.path.exists(out_dir):
+            os.makedirs(out_dir)
 
         filename = f'{now}_{response[1]}'
         image = response[0][0]
@@ -272,10 +287,10 @@ async def save_file(response):
         fileio.seek(0)
         if file_size < 6000000:
             filename = filename + '.png'   
-            image.save(f'{OUT_DIR}\{filename}', 'PNG')
+            image.save(f'{out_dir}\{filename}', 'PNG')
         else:
             filename = filename + '.jpg'   
-            image.save(f'{OUT_DIR}\{filename}', 'JPEG')
+            image.save(f'{out_dir}\{filename}', 'JPEG')
 
         return filename
 
@@ -286,7 +301,7 @@ async def save_file(response):
 
 
 
-async def worker_loop(dream_queue, awaken_queue, message_queue, worker, dream=None):
+async def worker_loop(dream_queue, awaken_queue, message_queue, worker, out_dir, dream=None):
     dream = None
     while True:
         try:
@@ -295,7 +310,7 @@ async def worker_loop(dream_queue, awaken_queue, message_queue, worker, dream=No
                 print(f'Worker: worker_loop: dream_queue is found! / {dream_queue.qsize()}')
                 dream = dream_queue.get()
                 response = await worker.dreaming(dream)
-                filename = await save_file(response)
+                filename = await save_file(response, out_dir)
                 dream.append(filename)
                 dream.append(response[3])
                 awaken = dream
@@ -309,15 +324,15 @@ async def worker_loop(dream_queue, awaken_queue, message_queue, worker, dream=No
             message_queue.put(message)
             raise
 
-def worker_launch(dream_queue, awaken_queue, message_queue):
+def worker_launch(dream_queue, awaken_queue, message_queue, ckpt, out_dir):
     retry_count = 0
     dream = None
     while True:
         try:
             loop = asyncio.get_event_loop()
             print('start worker')
-            worker = SyncDiffusionWorker('waifu')
-            loop.run_until_complete(worker_loop(dream_queue, awaken_queue, message_queue, worker, dream))
+            worker = SyncDiffusionWorker(ckpt)
+            loop.run_until_complete(worker_loop(dream_queue, awaken_queue, message_queue, worker, out_dir, dream))
         except Exception as e:
             retry_count += 1
             message = f'worker: retry: {retry_count} / has error: {e}'
@@ -331,22 +346,52 @@ def worker_launch(dream_queue, awaken_queue, message_queue):
 
 
 if __name__ == "__main__":
+
+
+
+    if opt.modeltype == None:
+        modeltype = questionary.select(
+            'Model?',
+            choices=['normal', 'waifu', 'trinart2-min', 'trinart2-max']
+        ).ask()
+    else:
+        modeltype = opt.modeltype
+    if opt.workers == None:
+        workers = int(questionary.text('How many workers?').ask())
+    else:
+        workers = opt.workers
+
+    if modeltype == 'normal':
+        ckpt = 'models/ldm/stable-diffusion-v1/sd-v1-4.ckpt'
+        TOKEN = os.getenv('DISCORD_TOKEN_NORMAL')
+    elif modeltype == 'waifu':
+        ckpt = 'models/ldm/stable-diffusion-v1/wd-v1-2-full-ema.ckpt'
+        TOKEN = os.getenv('DISCORD_TOKEN_WAIFU')
+    elif modeltype == 'trinart2-min':
+        ckpt = 'models/ldm/stable-diffusion-v1/trinart2_step60000.ckpt'
+        TOKEN = os.getenv('DISCORD_TOKEN_TRINART2_MIN')
+    elif modeltype == 'trinart2-max':
+        ckpt = 'models/ldm/stable-diffusion-v1/trinart2_step115000.ckpt'
+        TOKEN = os.getenv('DISCORD_TOKEN_TRINART2_MAX')
+    else:
+        raise Exception('ckpt is not found!')
+
+    out_dir = f'outputs\{opt.modeltype}'
+
+
+
     dream_queue = Queue()
     awaken_queue = Queue()
     message_queue = Queue()
-    bot_thread = Thread(target=bot_launch, args=(dream_queue, awaken_queue, message_queue))
-    worker0_proc = Process(target=worker_launch, args=(dream_queue, awaken_queue, message_queue))
-    worker1_proc = Process(target=worker_launch, args=(dream_queue, awaken_queue, message_queue))
-#    worker2_proc = Process(target=worker_launch, args=(dream_queue, awaken_queue, message_queue))
-#    worker3_proc = Process(target=worker_launch, args=(dream_queue, awaken_queue, message_queue))
 
+    bot_thread = Thread(target=bot_launch, args=(dream_queue, awaken_queue, message_queue, out_dir))
     bot_thread.start()
-    worker0_proc.start()
-    worker1_proc.start()
-#    worker2_proc.start()
-#    worker3_proc.start()
 
-    worker0_proc.join()
-    worker1_proc.join()
-#    worker2_proc.join()
-#    worker3_proc.join()
+    for i in range(workers):
+        p = Process(target=worker_launch, args=(dream_queue, awaken_queue, message_queue, ckpt, out_dir))
+        p.start()
+        processes.append(p)
+
+    bot_thread.join()
+    for p in processes:
+        p.join()
