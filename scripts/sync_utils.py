@@ -1064,7 +1064,7 @@ def copy_img_to_input(selected=1, imgs = []):
         return [None, None]
 
 class SyncDiffusionWorker():
-    def __init__(self):
+    def __init__(self, modeltype: str = 'default'):
         GFPGAN = None
         if os.path.exists(GFPGAN_dir):
             try:
@@ -1079,7 +1079,12 @@ class SyncDiffusionWorker():
         try_loading_RealESRGAN('RealESRGAN_x4plus')
 
         config = OmegaConf.load("configs/stable-diffusion/v1-inference.yaml")
-        model = load_model_from_config(config, "models/ldm/stable-diffusion-v1/model.ckpt")
+
+        model = None
+        if modeltype == 'default':
+            model = load_model_from_config(config, "models/ldm/stable-diffusion-v1/sd-v1-4.ckpt")
+        elif modeltype == 'waifu':
+            model = load_model_from_config(config, "models/ldm/stable-diffusion-v1/wd-v1-2-full-ema.ckpt")
 
         gpu_ids = [0, 1]
 

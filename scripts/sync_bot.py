@@ -86,7 +86,8 @@ class SyncDiffusionJob():
             print(f'bot: SyncDiffusionJob(): terminate()')
             await asyncio.sleep(randint(0, 2))
             print(f'bot: SyncDiffusionJob(): terminate(): await asyncio.sleep')
-            response_message = f'seed:  {self.seed}\nitr: {self.current_itr} / {self.total_itr}'
+            print(awaken)
+            response_message = f'seed:  {self.seed}\nitr: {self.current_itr} / {self.total_itr}\nfilename: {awaken[2]}\nuser: {self.interaction.user.name} ({self.interaction.user.id}){awaken[3]}'
             print(f'bot: SyncDiffusionJob(): terminate(): response_message: {response_message}')
             fp = f'{OUT_DIR}\{awaken[2]}'
             print(f'bot: SyncDiffusionJob(): terminate(): fp: {fp}')
@@ -153,6 +154,9 @@ class SyncDiffusionCog(commands.Cog):
         try: 
             print(f'bot: recieve_dream() / dream_queue: {self.dream_queue.qsize()}')
 
+            username = interaction.user.name
+            userid = interaction.user.id
+
             ddim_eta = 0.0
             n_iter = 1
             batch_size = 1
@@ -186,7 +190,7 @@ class SyncDiffusionCog(commands.Cog):
 
             fp = None
     
-            message = f'{prompt} \n\nitr:{itr} ar:{ar} basesize:{basesize} \nddim_steps:{ddim_steps} cfg_scale:{cfg_scale} sampler_name:{sampler_name} \nmatrix:{matrix} normalize:{normalize} gfpgan:{gfpgan} realesrgan:{realesrgan} realesrgan_anime:{realesrgan_anime}'
+            message = f'{prompt} \n\nitr:{itr} ar:{ar} basesize:{basesize} \nddim_steps:{ddim_steps} cfg_scale:{cfg_scale} sampler_name:{sampler_name} \nmatrix:{matrix} normalize:{normalize} gfpgan:{gfpgan} realesrgan:{realesrgan} realesrgan_anime:{realesrgan_anime}\n\nuser: {username} ({userid})'
             await interaction.response.send_message(content=message)
             print(itr)
 
@@ -212,7 +216,7 @@ class SyncDiffusionCog(commands.Cog):
 #        print(f'bot: bot_loop: self.awaken_queue / {self.awaken_queue.qsize()}')
         try:
             if not self.message_queue.empty():
-                message = self.message.get()
+                message = self.message_queue.get()
                 print(f'bot: force_send_message: message: {message}')
                 await discord.interaction.response.send_message(content=message)
 
@@ -293,6 +297,7 @@ async def worker_loop(dream_queue, awaken_queue, message_queue, worker, dream=No
                 response = await worker.dreaming(dream)
                 filename = await save_file(response)
                 dream.append(filename)
+                dream.append(response[3])
                 awaken = dream
                 awaken_queue.put(awaken)
             else:
@@ -311,7 +316,7 @@ def worker_launch(dream_queue, awaken_queue, message_queue):
         try:
             loop = asyncio.get_event_loop()
             print('start worker')
-            worker = SyncDiffusionWorker()
+            worker = SyncDiffusionWorker('waifu')
             loop.run_until_complete(worker_loop(dream_queue, awaken_queue, message_queue, worker, dream))
         except Exception as e:
             retry_count += 1
