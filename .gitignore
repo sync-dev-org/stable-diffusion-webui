@@ -57,6 +57,4 @@ condaenv.*.requirements.txt
 /log/**/*.png
 /log/log.csv
 /flagged/*
-
-.env
-*.pth
+/gfpgan/*
