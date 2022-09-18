@@ -347,10 +347,6 @@ def worker_launch(dream_queue, awaken_queue, message_queue, ckpt, out_dir):
 
 
 if __name__ == "__main__":
-
-
-
-
     if opt.modeltype == None:
         modeltype = questionary.select(
             'Model?',
