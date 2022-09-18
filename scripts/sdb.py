@@ -206,7 +206,7 @@ class SyncDiffusionCog(commands.Cog):
             fp = None
     
             message = f'{prompt}\n```itr:{itr} ar:{ar} basesize:{basesize} \nddim_steps:{ddim_steps} cfg_scale:{cfg_scale} sampler_name:{sampler_name} \nmatrix:{matrix} normalize:{normalize} gfpgan:{gfpgan} realesrgan:{realesrgan} realesrgan_anime:{realesrgan_anime}\nuser: {username} ({userid})```'
-            await interaction.response.send_message(content=message)
+            await interaction.response.send_message(content=message, view=InfoButtons(self))
             print(itr)
 
             for i in range(itr):
@@ -256,11 +256,12 @@ def bot_launch(dream_queue, awaken_queue, message_queue, out_dir):
         try:
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
-            print('start bot')
+            print('bot_launch: start bot')
             bot = SyncDiffusionBot(dream_queue, awaken_queue, message_queue)
             
             loop.run_until_complete(bot.add_cog(SyncDiffusionCog(bot, dream_queue, awaken_queue, message_queue, out_dir)))
-            asyncio.run(bot.start(token=TOKEN))
+            loop.run_until_complete(bot.start(token=TOKEN))
+            raise Exception('bot_launch: stop bot')
         except Exception as e:
             retry_count += 1
             message = f'bot: retry: {retry_count} / has error: {e}'
@@ -346,6 +347,7 @@ def worker_launch(dream_queue, awaken_queue, message_queue, ckpt, out_dir):
 
 
 if __name__ == "__main__":
+
 
 
 

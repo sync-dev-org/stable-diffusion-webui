@@ -21,6 +21,7 @@ parser.add_argument("--defaults", type=str, help="path to configuration file pro
 parser.add_argument("--cli", type=str, help="don't launch web server, take Python function kwargs from this file.", default=None)
 parser.add_argument("--modeltype", type=str, default=None, help="name of model",)
 parser.add_argument("--workers", type=int, default=None, help="quantity of worker",)
+parser.add_argument("--all", action='store_true', help="all")
 
 opt = parser.parse_args()
 
