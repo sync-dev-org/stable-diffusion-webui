@@ -54,6 +54,8 @@ class ResultButtons(discord.ui.View):
     async def upscale_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         try:
             button.style = discord.ButtonStyle.green
+            print(interaction.message.content)
+
             await interaction.response.send_message(content=f"UpScale!")
         except Exception as e:
             await discord.interaction.response.send_message(content=str(e))

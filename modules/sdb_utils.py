@@ -1183,6 +1183,13 @@ class SyncDiffusionWorker():
     async def dreaming(self, dream):
         print(dream)
         response = await txt2img(*dream[1], self.model, self.device, self.GFPGAN)
+        # response =  output_images, seed, info, stats
+        print(response)
+        return response
+
+    async def upsclaing(self, img, model_name):
+        print(dream)
+        response = run_RealESRGAN(img, model_name)
         print(response)
         return response
 
