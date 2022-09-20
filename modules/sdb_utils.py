@@ -1187,8 +1187,9 @@ class SyncDiffusionWorker():
         print(response)
         return response
 
-    async def upsclaing(self, img, model_name):
-        print(dream)
+    async def upsclaing(self, filename):
+        img = Image.open(filename)
+        model_name = 'RealESRGAN_x4plus'
         response = run_RealESRGAN(img, model_name)
         print(response)
         return response
