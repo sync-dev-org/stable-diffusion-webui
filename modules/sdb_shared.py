@@ -28,3 +28,46 @@ opt = parser.parse_args()
 
 # processes
 processes = []
+
+cpkts = [
+    {
+        'name': 'sd1.5',
+        'trigger': 'None',
+        'path': '../models/sd-v1-5-pruned.ckpt'
+    },
+    {
+        'name': 'wd1.2',
+        'trigger': 'None',
+        'path': '../models/wd-v1-2-full-ema.ckpt'
+    },
+    {
+        'name': 'wd1.3',
+        'trigger': 'None',
+        'path': '../models/wd-v1-3-full.ckpt'
+    },
+    {
+        'name': 'anything3.0',
+        'trigger': 'None',
+        'path': '../models/Anything-V3.0'
+    },
+    {
+        'name': 'csr',
+        'trigger': 'image of SystemyTrigger girl',
+        'path': '../models/CSRmodel.ckpt'
+    },
+    {
+        'name': 'f222',
+        'trigger': 'None',
+        'path': '../models/f222.ckpt'
+    },
+    {
+        'name': 'mmd',
+        'trigger': 'Any',
+        'path': '../models/MMD V1-18 MODEL MERGE (TONED DOWN) ALPHA.ckpt'
+    },
+    {
+        'name': 'hassan1.2',
+        'trigger': 'Any',
+        'path': '../models/HassansBlend 1.2.ckpt'
+    }
+]

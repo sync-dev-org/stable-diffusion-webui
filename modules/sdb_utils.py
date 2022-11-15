@@ -1048,6 +1048,7 @@ def copy_img_to_input(selected=1, imgs = []):
 
 class SyncDiffusionWorker():
     def __init__(self, ckpt):
+        self.ckpt = ckpt
         GFPGAN = None
         if os.path.exists(GFPGAN_dir):
             try:
@@ -1063,7 +1064,7 @@ class SyncDiffusionWorker():
 
         config = OmegaConf.load("configs/stable-diffusion/v1-inference.yaml")
 
-        model = load_model_from_config(config, ckpt)
+        model = load_model_from_config(config, self.ckpt['path'])
 
         gpu_ids = [0, 1]
 

@@ -6,7 +6,7 @@ from io import BytesIO
 from multiprocessing import Process, Queue
 from threading import Thread
 
-from modules.sdb_shared import opt, processes
+from modules.sdb_shared import opt, processes, cpkts
 from modules.sdb_upscaler import SyncDiffusionUpscaler
 from modules.sdb_utils import SyncDiffusionWorker
 from modules.sdb_discord import SyncDiffusionBot, SyncDiffusionCog
@@ -22,7 +22,7 @@ load_dotenv()
 
 
 
-def bot_launch(dream_queue, awaken_queue, message_queue, upscale_queue, out_dir):
+def bot_launch(dream_queue, awaken_queue, message_queue, upscale_queue, out_dir, restart_queue):
     retry_count = 0
     while True:
         try:
@@ -31,7 +31,7 @@ def bot_launch(dream_queue, awaken_queue, message_queue, upscale_queue, out_dir)
             print('bot_launch: start bot')
             bot = SyncDiffusionBot(dream_queue, awaken_queue, message_queue)
             
-            loop.run_until_complete(bot.add_cog(SyncDiffusionCog(bot, dream_queue, awaken_queue, message_queue, upscale_queue, out_dir)))
+            loop.run_until_complete(bot.add_cog(SyncDiffusionCog(bot, dream_queue, awaken_queue, message_queue, upscale_queue, out_dir, restart_queue)))
             loop.run_until_complete(bot.start(token=TOKEN))
             raise Exception('bot_launch: stop bot')
         except Exception as e:
@@ -46,7 +46,7 @@ def bot_launch(dream_queue, awaken_queue, message_queue, upscale_queue, out_dir)
 
 async def save_file(response, out_dir):
     try:
-        print(f'response: {str(response)}')
+        print(f'save_file: response: {str(response)}')
         now = int(time.time())
 
         if not os.path.exists(out_dir):
@@ -80,8 +80,9 @@ async def worker_loop(dream_queue, awaken_queue, message_queue, worker, out_dir,
         try:
 #            print(f'Worker: worker_loop: dream_queue / {dream_queue.qsize()}')
             if not dream_queue.empty():
-                print(f'Worker: worker_loop: dream_queue is found! / {dream_queue.qsize()}')
+#                print(f'Worker {worker.ckpt["name"]}: worker_loop: dream_queue is found! / {dream_queue.qsize()}')
                 dream = dream_queue.get()
+#                print(f'----------------------')
                 response = await worker.dreaming(dream)
                 filename = await save_file(response, out_dir)
                 dream.append(filename)
@@ -90,9 +91,9 @@ async def worker_loop(dream_queue, awaken_queue, message_queue, worker, out_dir,
                 awaken_queue.put(awaken)
             else:
     #            print('Dream Queue is empty!')
-                await asyncio.sleep(0.5)
+                await asyncio.sleep(0.2)
         except Exception as e:
-            message = f'worker: worker_loop: has error: {e}'
+            message = f'Worker {worker.ckpt["name"]}: worker_loop: has error: {e}'
             print(message)
             message_queue.put(message)
             raise
@@ -103,12 +104,13 @@ def worker_launch(dream_queue, awaken_queue, message_queue, ckpt, out_dir):
     while True:
         try:
             loop = asyncio.get_event_loop()
-            print('start worker')
+            print('Worker: worker_launch: start worker')
             worker = SyncDiffusionWorker(ckpt)
+            print(f'Worker: worker_launch: {worker.ckpt["name"]} launched')
             loop.run_until_complete(worker_loop(dream_queue, awaken_queue, message_queue, worker, out_dir, dream))
         except Exception as e:
             retry_count += 1
-            message = f'worker: retry: {retry_count} / has error: {e}'
+            message = f'Worker: worker_launch: retry: {retry_count} / has error: {e}'
             print(message)
             message_queue.put(message)
             del worker
@@ -174,53 +176,50 @@ def upscaler_launch(upscale_queue, out_dir):
 
 
 if __name__ == "__main__":
-    if opt.modeltype == None:
-        modeltype = questionary.select(
-            'Model?',
-            choices=['normal', 'waifu', 'trinart2-min', 'trinart2-max']
-        ).ask()
-    else:
-        modeltype = opt.modeltype
-    if opt.workers == None:
-        workers = int(questionary.text('How many workers?').ask())
-    else:
-        workers = opt.workers
 
-    if modeltype == 'normal':
-        ckpt = 'models/ldm/stable-diffusion-v1/sd-v1-4.ckpt'
-        TOKEN = os.getenv('DISCORD_TOKEN_NORMAL')
-    elif modeltype == 'waifu':
-        ckpt = 'models/ldm/stable-diffusion-v1/wd-v1-2-full-ema.ckpt'
-        TOKEN = os.getenv('DISCORD_TOKEN_WAIFU')
-    elif modeltype == 'trinart2-min':
-        ckpt = 'models/ldm/stable-diffusion-v1/trinart2_step60000.ckpt'
-        TOKEN = os.getenv('DISCORD_TOKEN_TRINART2_MIN')
-    elif modeltype == 'trinart2-max':
-        ckpt = 'models/ldm/stable-diffusion-v1/trinart2_step115000.ckpt'
-        TOKEN = os.getenv('DISCORD_TOKEN_TRINART2_MAX')
-    else:
-        raise Exception('ckpt is not found!')
+    TOKEN = os.getenv('DISCORD_TOKEN')
 
-    out_dir = f'outputs\{modeltype}'
+    out_dir = f'outputs\gevanni'
 
 
-
+    restart_queue = Queue()
     dream_queue = Queue()
     awaken_queue = Queue()
     message_queue = Queue()
     upscale_queue = Queue()
 
-    bot_thread = Thread(target=bot_launch, args=(dream_queue, awaken_queue, message_queue, upscale_queue, out_dir))
+    bot_thread = Thread(target=bot_launch, args=(dream_queue, awaken_queue, message_queue, upscale_queue, out_dir, restart_queue))
     bot_thread.start()
 
     upscaler_process = Process(target=upscaler_launch, args=(upscale_queue, out_dir))
     upscaler_process.start()
 
-    for i in range(workers):
-        p = Process(target=worker_launch, args=(dream_queue, awaken_queue, message_queue, ckpt, out_dir))
+
+    search_ckpt = list(filter(lambda item : item['name'] == 'sd1.5', cpkts))
+    default_ckpt = search_ckpt[0]
+
+    p = Process(target=worker_launch, args=(dream_queue, awaken_queue, message_queue, default_ckpt, out_dir))
+    p.start()
+    processes.append(p)
+
+
+    '''
+    for i in range(len(cpkts)):
+        p = Process(target=worker_launch, args=(dream_queue, awaken_queue, message_queue, cpkts[i], out_dir))
         p.start()
         processes.append(p)
+    '''
 
+
+    while True:
+        if not restart_queue.empty:
+            print('restart_queue is found!')
+
+
+
+
+    '''
     bot_thread.join()
     for p in processes:
         p.join()
+    '''

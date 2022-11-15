@@ -4,11 +4,12 @@ import uuid
 from io import BytesIO
 import math
 from PIL import Image, ImageFont, ImageDraw, ImageFilter, ImageOps
+import json
 
 import discord
 from discord.ext import commands, tasks
 
-from modules.sdb_shared import opt, processes
+from modules.sdb_shared import opt, processes, cpkts
 from modules.sdb_upscaler import SyncDiffusionUpscaler
 
 
@@ -49,7 +50,7 @@ class SyncDiffusionBot(commands.Bot):
         print('Synced!')
 
 class SyncDiffusionCog(commands.Cog):
-    def __init__(self, bot: commands.Bot, dream_queue, awaken_queue, message_queue, upscale_queue, out_dir) -> None:
+    def __init__(self, bot: commands.Bot, dream_queue, awaken_queue, message_queue, upscale_queue, out_dir, restart_queue) -> None:
         self.loop = asyncio.get_event_loop()
         self.bot = bot
         self.dream_queue = dream_queue
@@ -60,6 +61,7 @@ class SyncDiffusionCog(commands.Cog):
         self.jobs = dict()
         self.upscale_jobs = dict()
         self.out_dir = out_dir
+        self.restart_queue = restart_queue
 
     async def setup_hook(self) -> None:
         print(f'bot: setup_hook(self)')
@@ -80,9 +82,30 @@ class SyncDiffusionCog(commands.Cog):
             await discord.interaction.response.send_message(content=str(e))
             raise
 
+    '''
+    @discord.app_commands.command(name="model")
+    async def change_model(self, interaction: discord.Interaction, model: str):
+        try:
+            print(f'bot: change_model')
+            model_list = json.dumps(cpkts)
+            list_search = list(filter(lambda item : item['name'] == model, cpkts))
+            dict_search = list_search[0]
+
+            if list_search:
+                print(f'bot: change_model: {model}')
+
+                await interaction.response.send_message(content=f"```model: {model}\n\n{model_list}```")
+            else:
+                print(f'bot: change_model: {model} not found')
+                await interaction.response.send_message(content=f"```model: {model} not found\n\n{model_list}```")
+        except Exception as e:
+            await discord.interaction.response.send_message(content=str(e))
+            raise
+    '''
+
 
     @discord.app_commands.command(name="dream")
-    async def recieve_dream(self, interaction: discord.Interaction, prompt: str, seed: int = None, itr: int = 1, ar: str = '1:1', 
+    async def recieve_dream(self, interaction: discord.Interaction, prompt: str, model:str = 'sd', seed: int = None, itr: int = 1, ar: str = '1:1', 
         basesize: int = 512, ddim_steps: int = 25, cfg_scale: float = 7.5, sampler_name: str = 'k_lms', matrix: bool = False, normalize: bool = True, 
         gfpgan: bool = True, realesrgan: bool = False, realesrgan_anime:bool = False):
         try: 
@@ -122,7 +145,7 @@ class SyncDiffusionCog(commands.Cog):
 
             fp = None
     
-            message = f'{prompt}\n```itr:{itr} ar:{ar} basesize:{basesize} \nddim_steps:{ddim_steps} cfg_scale:{cfg_scale} sampler_name:{sampler_name} \nmatrix:{matrix} normalize:{normalize} gfpgan:{gfpgan} realesrgan:{realesrgan} realesrgan_anime:{realesrgan_anime}\nuser: {username} ({userid})```'
+            message = f'{prompt}\n```itr:{itr} ar:{ar} basesize:{basesize} \nmodel: {model} \nddim_steps:{ddim_steps} cfg_scale:{cfg_scale} sampler_name:{sampler_name} \nmatrix:{matrix} normalize:{normalize} gfpgan:{gfpgan} realesrgan:{realesrgan} realesrgan_anime:{realesrgan_anime}\nuser: {username} ({userid})```'
             await interaction.response.send_message(content=message, view=InfoButtons(self))
             print(itr)
 
@@ -135,7 +158,7 @@ class SyncDiffusionCog(commands.Cog):
                     seed = randint(0, 9999999999)
                 workload = 'dream'
                 payload = [prompt, ddim_steps, sampler_name, toggles, realesrgan_model_name, ddim_eta, n_iter, batch_size, cfg_scale, seed, height, width, fp]
-                job = SyncDiffusionJob(id, workload, interaction, payload, seed, total_itr, current_itr, self.dream_queue, self.awaken_queue, self.message_queue, self.upscale_queue, self.upscale_jobs, self.out_dir)
+                job = SyncDiffusionJob(id, workload, interaction, payload, seed, total_itr, current_itr, self.dream_queue, self.awaken_queue, self.message_queue, self.upscale_queue, self.upscale_jobs, self.out_dir, model)
                 self.jobs[id] = job
                 await job.dreaming()
 
@@ -188,7 +211,7 @@ class SyncDiffusionCog(commands.Cog):
             raise
 
 class SyncDiffusionJob():
-    def __init__(self, id, workload, interaction, payload, seed, total_itr, current_itr, dream_queue, awaken_queue, message_queue, upscale_queue, upscale_jobs, out_dir):
+    def __init__(self, id, workload, interaction, payload, seed, total_itr, current_itr, dream_queue, awaken_queue, message_queue, upscale_queue, upscale_jobs, out_dir, model):
         self.id = id
         self.workload = workload
         self.interaction = interaction
@@ -203,11 +226,12 @@ class SyncDiffusionJob():
         self.upscale_queue = upscale_queue
         self.upscale_jobs = upscale_jobs
         self.out_dir = out_dir
+        self.model = model
 
     async def dreaming(self):
         try:
             self.status = 'dreaming'
-            dream = [self.id, self.payload]
+            dream = [self.id, self.payload, self.model]
             self.dream_queue.put(dream)
         except Exception as e:
             await discord.interaction.response.send_message(content=str(e))
@@ -219,13 +243,14 @@ class SyncDiffusionJob():
             await asyncio.sleep(randint(0, 2))
             print(f'bot: SyncDiffusionJob(): terminate(): await asyncio.sleep')
             print(awaken)
-            response_message = f'```seed:  {self.seed}\nitr: {self.current_itr} / {self.total_itr}\nfilename: {awaken[2]}\nuser: {self.interaction.user.name} ({self.interaction.user.id}){awaken[3]}```'
+            response_message = f'```seed:  {self.seed}\nitr: {self.current_itr} / {self.total_itr}\nmodel: {awaken[2]}\nfilename: {awaken[3]}\nuser: {self.interaction.user.name} ({self.interaction.user.id}){awaken[4]}```'
             print(f'bot: SyncDiffusionJob(): terminate(): response_message: {response_message}')
-            fp = f'{self.out_dir}\{awaken[2]}'
+            fp = f'{self.out_dir}\{awaken[3]}'
             print(f'bot: SyncDiffusionJob(): terminate(): fp: {fp}')
             original_message = await self.interaction.original_response()
             print(f'bot: SyncDiffusionJob(): terminate(): original_message: {original_message}')
-            await original_message.reply(content=response_message, file=discord.File(fp=fp, filename=awaken[2]), view=ResultButtons(self))
+#            await original_message.reply(content=response_message, file=discord.File(fp=fp, filename=awaken[2]), view=ResultButtons(self))
+            await original_message.reply(content=response_message, file=discord.File(fp=fp, filename=awaken[3]))
             self.status = 'terminated'
             print(f'bot: SyncDiffusionJob(): terminate(): status: {self.status}')
         except Exception as e:
